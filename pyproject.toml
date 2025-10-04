@@ -29,7 +29,9 @@ classifiers = [
     "Topic :: Utilities",
     "Typing :: Typed",
 ]
-dependencies = []
+dependencies = [
+    "google-genai>=1.41.0",
+]
 
 [project.urls]
 Homepage = "https://vandyG.github.io/webverse"
