@@ -1,0 +1,9 @@
+[project]
+name = "webverse"
+version = "0.1.0"
+description = "Spin your own Spider-Man story"
+requires-python = ">=3.10, <3.13"
+dependencies = [
+    "agentuity>=0.0.106",
+    "google-genai>=1.41.0",
+]
