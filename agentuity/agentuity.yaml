@@ -74,3 +74,6 @@ agents:
   - id: agent_8ca113ae757de559757f0b91e2d219b4
     name: image-generator
     description: Renders final comic page images from illustrator guidance.
+  - id: agent_0869fb10adad5aa7841eb834eccfda58
+    name: director
+    description: Orchestrates the handoff between the different agents and acts as api endpoint.
