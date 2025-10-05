@@ -38,8 +38,7 @@ INTRO_INSTRUCTIONS = (
 
 CONTINUATION_INSTRUCTIONS = (
     "Continue the serialized story using the provided history and the player's latest choice. "
-    "Reference the most recent events, keep continuity tight, and escalate stakes. Close with "
-    "a new cliffhanger that matches both next-step choices."  # noqa: Q000
+    "Reference the most recent events, keep continuity tight, and escalate stakes. Close with a new cliffhanger."  # noqa: Q000
 )
 
 FALLBACK_VILLAINS = [
@@ -317,19 +316,23 @@ def _fallback_story(seed: int) -> Dict[str, Any]:
 
 
 def _build_model_prompt(
-    history: List[Dict[str, Any]], choice: Optional[str], prompt: str
+    history: List[Dict[str, Any]], choice: Optional[str], prompt: str, previous_page: Optional[int] = None, page_number: Optional[int] = None
 ) -> str:
     recent_history = history[-5:] if history else []
     context_payload = {
         "recent_history": recent_history,
         "latest_choice": choice,
+        "previous_page": previous_page,
+        "page_number": page_number,
     }
     context_json = json.dumps(context_payload, ensure_ascii=False, separators=(",", ":"))
-    return (
+    model_prompt_text = (
         f"{prompt}\n"
         "Use the JSON context below to maintain narrative continuity and respond with a payload that matches the schema.\n"
         f"Context:{context_json}"
     )
+    logger.info("Model prompt generated (page_number=%s, previous_page=%s): %s", page_number, previous_page, model_prompt_text)
+    return model_prompt_text
 
 
 def _coerce_model_payload(
@@ -374,8 +377,21 @@ async def run(request: AgentRequest, response: AgentResponse, context: AgentCont
         choice = str(choice)
 
     seed = secrets.randbits(32)
+    # Determine the page number we are about to generate
+    page_number = len(history) + 1
     prompt = INTRO_INSTRUCTIONS if not history else CONTINUATION_INSTRUCTIONS
-    model_prompt = _build_model_prompt(history, choice, prompt)
+    # Determine previous page number from history if available
+    previous_page: Optional[int] = None
+    if history:
+        try:
+            last_entry = history[-1]
+            previous_page = int(last_entry.get("page")) if last_entry.get("page") is not None else None
+        except Exception:
+            previous_page = None
+
+    model_prompt = _build_model_prompt(
+        history, choice, prompt, previous_page=previous_page, page_number=page_number
+    )
 
     try:
         model_result = client.models.generate_content(
@@ -432,8 +448,8 @@ async def run(request: AgentRequest, response: AgentResponse, context: AgentCont
         page_payload["previous_choice"] = choice
 
     logger.info(f"Generated page: {page_payload}")
-    # return response.json(page_payload)
-    return response.handoff(
-        params={"name": "illustrator"},
-        args=page_payload,
-    )
+    return response.json(page_payload)
+    # return response.handoff(
+    #     params={"name": "illustrator"},
+    #     args=page_payload,
+    # )
