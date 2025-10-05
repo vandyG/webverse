@@ -5,9 +5,13 @@ import os
 import random
 import secrets
 from typing import Any, Dict, List, Optional
+from logging import getLogger
 
 from agentuity import AgentContext, AgentRequest, AgentResponse
 from google import genai
+from google.genai import types
+
+logger = getLogger(__name__)
 
 # TODO: Add your key via `agentuity env set --secret GOOGLE_API_KEY`
 # Get your API key here: https://aistudio.google.com/apikey
@@ -20,12 +24,10 @@ client = genai.Client(api_key=api_key)
 
 SYSTEM_PROMPT = (
     "You are the narrative director for a choose-your-own-adventure Spider-Man comic. "
-    "Always answer with a single JSON object that matches this schema: {"  # noqa: Q000
-    "'story': string describing the cinematic scene in 3-5 sentences, "
-    "'dialogues': list of objects with keys 'character' and 'line', and "
-    "'choices': list of exactly two objects with keys 'id' (kebab-case) and 'label'. "
+    "At every prompt you generate a complete comic page. "
+    "At the end of every page you provide two distinct next-step choices for the reader. "
     "Set the tone to upbeat heroism with quips and high stakes. Keep every dialogue "
-    "line under 25 words. Never include markdown fencing or commentary outside the JSON object."  # noqa: E501,Q000
+    "line under 25 words. Never include markdown fencing."  # noqa: E501,Q000
 )
 
 INTRO_INSTRUCTIONS = (
@@ -68,6 +70,83 @@ FALLBACK_COMPLICATIONS = [
 ]
 
 
+COMIC_PAGE_SCHEMA: Dict[str, Any] = {
+    "title": "ComicPage",
+    "description": (
+        "JSON Schema for ComicPage model (see agentuity.agentuity_agents.writer.agent.ComicPage)."
+    ),
+    "type": "object",
+    "properties": {
+        "page": {
+            "type": "integer",
+            "description": "Page number in the serialized comic",
+            "minimum": 1,
+        },
+        "story": {
+            "type": "string",
+            "description": "Narrative text for the page",
+        },
+        "dialogues": {
+            "type": "array",
+            "description": "List of dialogue lines (character + line)",
+            "items": {
+                "type": "object",
+                "properties": {
+                    "character": {"type": "string"},
+                    "line": {"type": "string"},
+                },
+                "required": ["character", "line"],
+            },
+            "minItems": 1,
+            "maxItems": 8,
+        },
+        "choices": {
+            "type": "array",
+            "description": "Two next-step choices for the reader",
+            "items": {
+                "type": "object",
+                "properties": {
+                    "id": {"type": "string"},
+                    "label": {"type": "string"},
+                },
+                "required": ["id", "label"],
+            },
+            "minItems": 2,
+            "maxItems": 2,
+        },
+        "history": {
+            "type": "array",
+            "description": "Serialized history of previous pages (flexible structure)",
+            "items": {
+                "type": "object",
+                "properties": {
+                    "page": {"type": "integer"},
+                    "choice": {"type": "string"},
+                    "story": {"type": "string"},
+                },
+                "required": ["page", "story"],
+            },
+        },
+        "seed": {
+            "type": "integer",
+            "description": "Random seed used to derive fallback content",
+        },
+        "previous_choice": {
+            "type": "string",
+            "description": "Optionally, the choice that led to this page",
+        },
+    },
+    "required": [
+        "page",
+        "story",
+        "dialogues",
+        "choices",
+        "history",
+        "seed",
+    ],
+}
+
+
 def welcome() -> Dict[str, Any]:
     return {
         "welcome": "Welcome to the Spider-Verse storyteller! Ask for a page to begin a branched adventure.",
@@ -89,13 +168,17 @@ def _safe_json_loads(raw: str, context: AgentContext) -> Dict[str, Any]:
         loaded = json.loads(raw)
         if isinstance(loaded, dict):
             return loaded
-        context.logger.warning("Received JSON payload but it was not an object: %s", type(loaded))
+        context.logger.warning(
+            "Received JSON payload but it was not an object: %s", type(loaded)
+        )
     except json.JSONDecodeError:
         context.logger.debug("Failed to decode JSON payload", exc_info=True)
     return {}
 
 
-async def _extract_payload(request: AgentRequest, context: AgentContext) -> Dict[str, Any]:
+async def _extract_payload(
+    request: AgentRequest, context: AgentContext
+) -> Dict[str, Any]:
     # Prefer JSON payload when available, but gracefully fallback to text.
     try:
         payload = await request.data.json()
@@ -109,26 +192,6 @@ async def _extract_payload(request: AgentRequest, context: AgentContext) -> Dict
         return _safe_json_loads(text_payload, context)
     return {}
 
-
-def _build_prompt(history: List[Dict[str, Any]], choice: Optional[str], seed: int) -> str:
-    request_frame: Dict[str, Any] = {
-        "random_seed": seed,
-        "history": history[-5:],  # keep prompt brief but with enough context
-        "latest_choice": choice,
-        "request_type": "intro" if not history else "continuation",
-    }
-
-    contextual_instructions = INTRO_INSTRUCTIONS if not history else CONTINUATION_INSTRUCTIONS
-    payload_json = json.dumps(request_frame, ensure_ascii=False, separators=(",", ":"))
-
-    return (
-        f"{SYSTEM_PROMPT}\n"  # noqa: Q000
-        f"Guidance: {contextual_instructions}\n"
-        "Use the JSON below as your context and craft the next page."
-        f"\nContext:{payload_json}"
-    )
-
-
 def _normalize_dialogues(value: Any) -> List[Dict[str, str]]:
     dialogues: List[Dict[str, str]] = []
 
@@ -136,14 +199,25 @@ def _normalize_dialogues(value: Any) -> List[Dict[str, str]]:
         for character, line in value.items():
             line_text = str(line).strip()
             if line_text:
-                dialogues.append({"character": str(character).strip() or "Narrator", "line": line_text})
+                dialogues.append(
+                    {
+                        "character": str(character).strip() or "Narrator",
+                        "line": line_text,
+                    }
+                )
     elif isinstance(value, list):
         for item in value:
             if isinstance(item, dict):
-                character = str(item.get("character", "")) or str(item.get("speaker", ""))
-                line = str(item.get("line") or item.get("dialogue") or item.get("text") or "").strip()
+                character = str(item.get("character", "")) or str(
+                    item.get("speaker", "")
+                )
+                line = str(
+                    item.get("line") or item.get("dialogue") or item.get("text") or ""
+                ).strip()
                 if line:
-                    dialogues.append({"character": character or "Narrator", "line": line})
+                    dialogues.append(
+                        {"character": character or "Narrator", "line": line}
+                    )
             elif isinstance(item, str):
                 line = item.strip()
                 if line:
@@ -151,8 +225,14 @@ def _normalize_dialogues(value: Any) -> List[Dict[str, str]]:
 
     if not dialogues:
         dialogues = [
-            {"character": "Spider-Man", "line": "Guess it's another Tuesday in the Spider-Verse."},
-            {"character": "Narrator", "line": "Our hero braces himself as chaos erupts around him."},
+            {
+                "character": "Spider-Man",
+                "line": "Guess it's another Tuesday in the Spider-Verse.",
+            },
+            {
+                "character": "Narrator",
+                "line": "Our hero braces himself as chaos erupts around him.",
+            },
         ]
 
     return dialogues[:8]
@@ -163,7 +243,9 @@ def _normalize_choices(value: Any, seed: int) -> List[Dict[str, str]]:
     if isinstance(value, list):
         for item in value:
             if isinstance(item, dict):
-                label = str(item.get("label") or item.get("text") or item.get("choice") or "").strip()
+                label = str(
+                    item.get("label") or item.get("text") or item.get("choice") or ""
+                ).strip()
                 choice_id = str(item.get("id") or item.get("slug") or "").strip()
                 if label:
                     if not choice_id:
@@ -206,13 +288,25 @@ def _fallback_story(seed: int) -> Dict[str, Any]:
     )
 
     dialogues = [
-        {"character": "Spider-Man", "line": "Okay, bad guy roll call—who ordered the reality meltdown combo?"},
-        {"character": villain.title(), "line": "Spider-Man, you're just in time to watch New York unravel!"},
+        {
+            "character": "Spider-Man",
+            "line": "Okay, bad guy roll call—who ordered the reality meltdown combo?",
+        },
+        {
+            "character": villain.title(),
+            "line": "Spider-Man, you're just in time to watch New York unravel!",
+        },
     ]
 
     choices = [
-        {"id": "dive-straight-in", "label": "Dive straight into the fray and confront the villain."},
-        {"id": "secure-civilians", "label": "Secure the civilians before taking on the threat."},
+        {
+            "id": "dive-straight-in",
+            "label": "Dive straight into the fray and confront the villain.",
+        },
+        {
+            "id": "secure-civilians",
+            "label": "Secure the civilians before taking on the threat.",
+        },
     ]
 
     return {
@@ -222,8 +316,32 @@ def _fallback_story(seed: int) -> Dict[str, Any]:
     }
 
 
-def _coerce_model_payload(raw_text: str, seed: int, context: AgentContext) -> Dict[str, Any]:
-    cleaned = raw_text.strip().removeprefix("```json").removeprefix("```{}").rstrip("`").strip()
+def _build_model_prompt(
+    history: List[Dict[str, Any]], choice: Optional[str], prompt: str
+) -> str:
+    recent_history = history[-5:] if history else []
+    context_payload = {
+        "recent_history": recent_history,
+        "latest_choice": choice,
+    }
+    context_json = json.dumps(context_payload, ensure_ascii=False, separators=(",", ":"))
+    return (
+        f"{prompt}\n"
+        "Use the JSON context below to maintain narrative continuity and respond with a payload that matches the schema.\n"
+        f"Context:{context_json}"
+    )
+
+
+def _coerce_model_payload(
+    raw_text: str, seed: int, context: AgentContext
+) -> Dict[str, Any]:
+    cleaned = (
+        raw_text.strip()
+        .removeprefix("```json")
+        .removeprefix("```{}")
+        .rstrip("`")
+        .strip()
+    )
     try:
         parsed = json.loads(cleaned)
         if not isinstance(parsed, dict):
@@ -256,12 +374,23 @@ async def run(request: AgentRequest, response: AgentResponse, context: AgentCont
         choice = str(choice)
 
     seed = secrets.randbits(32)
-    prompt = _build_prompt(history, choice, seed)
+    prompt = INTRO_INSTRUCTIONS if not history else CONTINUATION_INSTRUCTIONS
+    model_prompt = _build_model_prompt(history, choice, prompt)
 
     try:
         model_result = client.models.generate_content(
             model="gemini-2.0-flash",
-            contents=prompt,
+            config=types.GenerateContentConfig(
+                thinking_config=types.ThinkingConfig(
+                    thinking_budget=0,  
+                ),
+                system_instruction=SYSTEM_PROMPT,
+                response_mime_type="application/json",
+                response_schema=COMIC_PAGE_SCHEMA,
+            ),
+            # The API expects Content/str/File/Part values; avoid passing raw lists or None.
+            # Serialize the recent history and choice into a single textual context blob.
+            contents=model_prompt,
         )
         raw_text = getattr(model_result, "text", "") or ""
         if not raw_text and getattr(model_result, "candidates", None):
@@ -302,7 +431,8 @@ async def run(request: AgentRequest, response: AgentResponse, context: AgentCont
     if choice:
         page_payload["previous_choice"] = choice
 
-    response.json(page_payload)
+    logger.info(f"Generated page: {page_payload}")
+    # return response.json(page_payload)
     return response.handoff(
         params={"name": "illustrator"},
         args=page_payload,
