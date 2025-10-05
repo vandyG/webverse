@@ -297,8 +297,4 @@ async def run(request: AgentRequest, response: AgentResponse, context: AgentCont
     }
 
     logger.info(f"Enriched response: {enriched_response}")
-    # return response.json(enriched_response)
-    return response.handoff(
-        params={"name": "image-generator"},
-        args=enriched_response,
-    )
+    return response.json(enriched_response)

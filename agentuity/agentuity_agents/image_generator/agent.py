@@ -65,20 +65,6 @@ def _compose_prompt(page: Dict[str, Any], illustration: Dict[str, Any]) -> str:
     else:
         panels_text = ""
 
-    choice_summary = ""
-    choices = page.get("choices") or illustration.get("choices")
-    if isinstance(choices, list) and choices:
-        formatted_choices = []
-        for choice in choices[:2]:
-            if isinstance(choice, dict):
-                label = str(choice.get("label") or "").strip()
-                if label:
-                    formatted_choices.append(label)
-            elif isinstance(choice, str) and choice.strip():
-                formatted_choices.append(choice.strip())
-        if formatted_choices:
-            choice_summary = "Choices presented: " + " | ".join(formatted_choices)
-
     prompt_sections = [
         "Spider-Man comic page concept art.",
         f"Story beat: {story}",
@@ -89,8 +75,6 @@ def _compose_prompt(page: Dict[str, Any], illustration: Dict[str, Any]) -> str:
     ]
     if panels_text:
         prompt_sections.append("Panel breakdown:\n" + panels_text)
-    if choice_summary:
-        prompt_sections.append(choice_summary)
 
     prompt_sections.append("Style: dynamic Marvel comic illustration, crisp inks, expressive action, cinematic perspective.")
 

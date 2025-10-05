@@ -151,7 +151,7 @@ def welcome() -> Dict[str, Any]:
         "welcome": "Welcome to the Spider-Verse storyteller! Ask for a page to begin a branched adventure.",
         "prompts": [
             {
-                "data": "Start a new Spider-Man comic adventure page",
+                "data": "Start a brand-new Spider-Man adventure with a surprising inciting incident in New York City. Invent an original villain motivation or anomaly. End with a sharp cliffhanger that naturally leads into both choices.",
                 "contentType": "text/plain",
             },
             {
@@ -367,12 +367,13 @@ def _coerce_model_payload(
 
 async def run(request: AgentRequest, response: AgentResponse, context: AgentContext):
     payload = await _extract_payload(request, context)
+    logger.info(f"Extracted payload: {payload}")
 
-    history = payload.get("history")
+    history = payload.get("history", [])
     if not isinstance(history, list):
         history = []
 
-    choice = payload.get("choice")
+    choice = payload.get("choice","")
     if choice is not None:
         choice = str(choice)
 
@@ -449,7 +450,3 @@ async def run(request: AgentRequest, response: AgentResponse, context: AgentCont
 
     logger.info(f"Generated page: {page_payload}")
     return response.json(page_payload)
-    # return response.handoff(
-    #     params={"name": "illustrator"},
-    #     args=page_payload,
-    # )
