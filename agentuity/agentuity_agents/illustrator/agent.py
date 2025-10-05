@@ -5,9 +5,14 @@ import os
 import random
 import re
 from typing import Any, Dict, List, Optional
+from logging import getLogger
+
+from google import genai
+from google.genai import types
 
 from agentuity import AgentContext, AgentRequest, AgentResponse
-from google import genai
+
+logger = getLogger(__name__)
 
 # TODO: Add your key via `agentuity env set --secret GOOGLE_API_KEY`
 api_key = os.getenv("GOOGLE_API_KEY")
@@ -19,13 +24,87 @@ client = genai.Client(api_key=api_key)
 
 ILLUSTRATOR_SYSTEM_PROMPT = (
     "You are the cinematic art director for a Spider-Man comic. "
-    "Given story context, respond with a JSON object containing: "
-    "'panel_layout' (array of 3-5 panels with 'panel', 'description', 'focus'), "
-    "'art_direction' (string that guides composition and perspective), "
-    "'color_palette' (string), 'lighting' (string describing mood lighting), "
-    "'image_prompt' (succinct prompt for an image generator), and "
-    "'sound_effects' (array of stylized SFX strings). Keep everything faithful to Spider-Man's tone."  # noqa: E501,Q000
+    "Given story context, respond with the illustration of comic page. "
+    "Generate a panel layout of up to 3 panels, each with a 'panel' number, description, and focus. "
+    "Next give an art direction that guides composition and perspective. "
+    "Also provide a 'color_palette' that defines the dominant colors and mood lighting. "
+    "Generate an image prompt that is a concise description of the entire page for an image generator. "
+    "Finally, suggest up to 4 'sound_effects' (stylized SFX strings). "
+    "Keep everything faithful to Spider-Man's tone."  # noqa: E501,Q000
 )
+
+COMIC_PAGE_SCHEMA = {
+  "title": "IllustrationPageSchema",
+  "type": "object",
+  "required": [
+    "panel_layout",
+    "art_direction",
+    "color_palette",
+    "lighting",
+    "image_prompt",
+    "sound_effects"
+  ],
+  "properties": {
+    "panel_layout": {
+      "type": "array",
+      "minItems": 1,
+      "maxItems": 3,
+      "items": {
+        "type": "object",
+        "required": ["panel", "description", "focus"],
+        "properties": {
+          "panel": {
+            "type": "integer",
+            "minimum": 1,
+            "description": "Panel index (1-based)."
+          },
+          "description": {
+            "type": "string",
+            "minLength": 1,
+            "description": "Concise description of the panel action or scene."
+          },
+          "focus": {
+            "type": "string",
+            "minLength": 1,
+            "description": "Primary subject or character focus (e.g., 'Spider-Man')."
+          }
+        }
+      }
+    },
+    "art_direction": {
+      "type": "string",
+      "minLength": 1,
+      "description": "Guidance for composition, perspective, and cinematic staging."
+    },
+    "color_palette": {
+      "type": "string",
+      "minLength": 1,
+      "description": "Dominant colors and overall mood (e.g., 'vibrant reds, electric blues')."
+    },
+    "lighting": {
+      "type": "string",
+      "minLength": 1,
+      "description": "Mood lighting description (e.g., 'nocturnal city glow with rim light')."
+    },
+    "image_prompt": {
+      "type": "string",
+      "minLength": 1,
+      "description": "Succinct prompt for an image generator describing the entire page."
+    },
+    "sound_effects": {
+      "type": "array",
+      "minItems": 1,
+      "maxItems": 4,
+      "items": {
+        "type": "string",
+        "minLength": 1,
+        "maxLength": 24,
+        "description": "Stylized SFX string (e.g., 'THWIP!')."
+      },
+      "description": "Up to four stylized sound-effect strings."
+    }
+  }
+}
 
 
 async def _extract_page_payload(request: AgentRequest, context: AgentContext) -> Dict[str, Any]:
@@ -58,9 +137,7 @@ def _build_prompt(page: Dict[str, Any]) -> str:
     }
     context_json = json.dumps(condensed_context, ensure_ascii=False, separators=(",", ":"))
     return (
-        f"{ILLUSTRATOR_SYSTEM_PROMPT}\n"
-        "Use the provided JSON context to design the artwork."
-        f"\nContext:{context_json}"
+        f"Context:{context_json}"
     )
 
 
@@ -186,6 +263,14 @@ async def run(request: AgentRequest, response: AgentResponse, context: AgentCont
         model_result = client.models.generate_content(
             model="gemini-2.0-flash",
             contents=prompt,
+            config=types.GenerateContentConfig(
+                thinking_config=types.ThinkingConfig(
+                    thinking_budget=0,  
+                ),
+                system_instruction=ILLUSTRATOR_SYSTEM_PROMPT,
+                response_mime_type="application/json",
+                response_schema=COMIC_PAGE_SCHEMA,
+            ),
         )
         raw_text = getattr(model_result, "text", "") or ""
         if not raw_text and getattr(model_result, "candidates", None):
@@ -211,7 +296,8 @@ async def run(request: AgentRequest, response: AgentResponse, context: AgentCont
         "illustration": illustration_payload,
     }
 
-    response.json(enriched_response)
+    logger.info(f"Enriched response: {enriched_response}")
+    # return response.json(enriched_response)
     return response.handoff(
         params={"name": "image-generator"},
         args=enriched_response,
