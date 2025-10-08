@@ -132,3 +132,14 @@ If you use or adapt the frontend UI, please give credit to the `webverse-userint
 ---
 
 If you'd like, I can also expand `agentuity/AGENTS.md` with an agent API spec or add examples that show the JSON shapes exchanged between agents and the frontend. Tell me which you'd prefer next.
+
+## Demo
+
+Watch a short demo of Webverse in action. If your Git hosting or viewer supports embedded HTML, the video will play inline. Otherwise you can download and view the file locally.
+
+<video controls width="720">
+	<source src="Webverse Demo.mp4" type="video/mp4">
+	Your browser does not support the video tag. You can download the demo here:
+	<a href="Webverse Demo.mp4">Download Webverse Demo.mp4</a>
+</video>
+
