@@ -6,11 +6,9 @@
 
 Spin your own Spider-Man style "Choose Your Own Adventure" digital comic with voice narration.
 
-<video controls width="720">
-	<source src="Webverse Demo.mp4" type="video/mp4">
-	Your browser does not support the video tag. You can download the demo here:
-	<a href="Webverse Demo.mp4">Download Webverse Demo.mp4</a>
-</video>
+![Webverse demo](.github/webverwse_demo.gif)
+
+If the GIF doesn't display, download it here: [Download Webverse Demo - 15.gif](.github/webverwse_demo.gif)
 
 This repository contains the core Python libraries and agent framework used to generate episodic, branching comic-story experiences. It includes a small collection of autonomous agents grouped under `agentuity` which orchestrate story direction, illustration, and text/voice generation. The frontend UI that serves as a beautiful comic-book style platform for interacting with these agents is hosted in a separate repository: https://github.com/PratyakshMathur/webverse-userinterface
 
