@@ -130,5 +130,3 @@ This project is released under the MIT license. See `LICENSE` for details.
 If you use or adapt the frontend UI, please give credit to the `webverse-userinterface` project by linking to https://github.com/PratyakshMathur/webverse-userinterface in your app and README.
 
 ---
-
-If you'd like, I can also expand `agentuity/AGENTS.md` with an agent API spec or add examples that show the JSON shapes exchanged between agents and the frontend. Tell me which you'd prefer next.
